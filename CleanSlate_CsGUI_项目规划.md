@@ -361,6 +361,7 @@ CleanSlate.CsGUI/
 │
 ├── CsUI/                    # C# WinForms 主界面
 │   ├── CsUI.csproj
+|   ├── OCs.GUI.cs           # GUI主文件
 │   └── ApiClient.cs         # HTTP API调用封装
 │
 ├── Backend/                 # Python 后端（从CleanSlate原样复制）

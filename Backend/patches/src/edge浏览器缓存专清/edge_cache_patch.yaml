@@ -1,0 +1,5 @@
+id: edge_cache_patch
+type: permanent
+self_destruct: false
+name: Edge 缓存专清 - Bohh
+risk: low
