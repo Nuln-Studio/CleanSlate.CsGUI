@@ -302,18 +302,6 @@ def clean_shadow_storage(item_id: str = None) -> bool:
 
 def clean_winsxs(item_id: str = None) -> bool:
     global _last_freed_gb
-    print("\n" + "=" * 70)
-    print("警告：此操作将永久删除系统更新备份")
-    print("执行后，已安装的 Windows 更新将无法卸载回滚")
-    print("如果系统出现兼容性问题，无法通过卸载更新修复")
-    print("请确认系统已稳定运行超过一个月，所有驱动和软件都正常")
-    print("=" * 70)
-    confirm = input("输入 'yes' 确认执行，否则取消: ").strip().lower()
-    if confirm != 'yes':
-        print("已取消 WinSxS 清理")
-        _log_clean("WINSXS", "WinSxS 组件存储", "已取消")
-        _last_freed_gb = 0.0
-        return False
     result = _run_cmd("Dism /Online /Cleanup-Image /StartComponentCleanup /ResetBase")
     _log_clean("WINSXS", "WinSxS 组件存储", "成功" if result else "失败")
     if result:
@@ -355,13 +343,6 @@ def clean_wechat_cache(item_id: str = None) -> bool:
 
 def clean_hibernation(item_id: str = None) -> bool:
     global _last_freed_gb
-    print("\n关闭休眠将释放磁盘空间，但系统将无法使用休眠功能")
-    confirm = input("确认关闭休眠？(y/N): ").strip().lower()
-    if confirm != 'y':
-        print("已取消关闭休眠")
-        _log_clean("HIBERNATION", "休眠文件", "已取消")
-        _last_freed_gb = 0.0
-        return False
     result = _run_cmd("powercfg -h off")
     _log_clean("HIBERNATION", "休眠文件", "成功" if result else "失败")
     _last_freed_gb = 0.0

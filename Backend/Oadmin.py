@@ -29,18 +29,12 @@ def run_as_admin():
     )
     if ret <= 32:
         print("获取管理员权限失败，或用户在 UAC 弹窗里选择了“否”。")
-        input()
-
     sys.exit(0)
 if __name__ == "__main__":
-    if not is_admin():
-        print("当前未使用管理员权限运行，程序将退出，请右键以管理员身份重新打开")
-        input()
-        sys.exit(1)
+    run_as_admin()
     try:
-        from main import main
-        main()
+        import api
+        api.main_entry()
     except ImportError as e:
-        print(f"启动主程序失败: {e}")
-        input()
+        print(f"模块导入失败: {e}")
         sys.exit(1)

@@ -4,6 +4,7 @@ import importlib.util
 import time
 import struct
 import threading
+from operator import truediv
 from pathlib import Path
 from scanner import get_all_scans
 from cleaner import run_cleaner, CLEAN_MAP
@@ -11,6 +12,8 @@ from config import AGGRESSIVE_MODE_ENABLED, ENABLE_PATCH, PATCH_DIR, BACKUP_DIR,
 
 class AppState:
     data = {}
+
+
 
 VERSION_NUM = "正式版v1.0.4"  #别忘了改这个！！！！！！！！！！！！！！！！！！
 VERSION_CODE = 1004   #别忘了改这个！！！！！！！！！！！！！！！！！！
@@ -536,3 +539,32 @@ def main():
         else:
             print("无效选项，请重新选择。")
             input("按回车键继续...")
+
+def backend_scan():
+    get_disk_info()
+    AppState.data = get_all_scans()
+    load_patches_from_dir()
+    for func in _patch_scans:
+        try:
+            res = func()
+            if res:
+                AppState.data[res.get("id")] = res
+        except Exception:
+            pass
+
+
+def backend_get_appstate():
+    return AppState
+
+def backend_get_constants():
+    return {
+        "version_num": VERSION_NUM,
+        "version_code": VERSION_CODE,
+        "emergency_mode": EMERGENCY_MODE
+    }
+def initialization(): #初始化清缓存
+    get_disk_info()
+    clean_backup_files()
+    clean_temp_patches()
+    return True
+
