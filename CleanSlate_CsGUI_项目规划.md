@@ -93,7 +93,7 @@
 **决策**：Backend Exe 启动后自动执行所有初始化工作（创建yaml、目录、加载补丁、扫描），不依赖外部程序准备环境。
 
 **依据**：
-- `main.py` 中的初始化逻辑（清理旧备份、加载配置、扫描磁盘、加载补丁）已全部封装为函数。
+- `Ccore.py` 中的初始化逻辑（清理旧备份、加载配置、扫描磁盘、加载补丁）已全部封装为函数。
 - 无论被谁调用（CLI双击 / Launcher / CsUI），行为一致。
 
 **好处**：
@@ -261,7 +261,7 @@ public class BackendHost
 
 **入口设计（双模）**：
 - `Oadmin.py`：管理员权限入口（保留，供CLI和API模式共用）。
-- `main.py`：
+- `Ccore.py`：
   - `initialize_backend()`：初始化函数（清理旧文件、加载配置、扫描、加载补丁）。
   - `run_cli_mode()`：原有CLI菜单逻辑（极客用户）。
   - `run_api_mode(pipe_name, parent_pid)`：API服务模式（GUI调用）。
@@ -362,7 +362,7 @@ def run_api_mode(pipe_name: str, parent_pid: int):
 - `cleaner.py`：`run_cleaner(item_id)` 返回 `{"success", "message", "freed_gb"}`。
 - `config.py`：`BASE_DIR`、`EMERGENCY_MODE`、路径逻辑、yaml配置加载。
 - `Oadmin.py`：权限检测 + 提权 + 调用 `main()`。
-- `main.py`：`AppState`、`initialize_backend()` 逻辑、`main()` 菜单编排。
+- `Ccore.py`：`AppState`、`initialize_backend()` 逻辑、`main()` 菜单编排。
 
 **API化适配**：新建 `api.py`（或 `run_api_mode`），导入现有函数封装即可；`cleaner.py` 中带 `input()` 的高危项（如 `clean_winsxs()`、`clean_hibernation()`）在 API 模式下由 `allow_high_risk` 参数控制，默认跳过。
 
@@ -408,7 +408,7 @@ def run_api_mode(pipe_name: str, parent_pid: int):
 - [x] 确认 `config.py` 路径逻辑稳健
 - [x] 确认 `Oadmin.py` 权限模型可用
 - [ ] 新建 `api.py`（FastAPI应用 + Token鉴权依赖）
-- [ ] 改造 `main.py`：抽取 `initialize_backend()` 函数
+- [ ] 改造 `Ccore.py`：抽取 `initialize_backend()` 函数
 - [ ] 实现命名管道服务端（握手JSON + 日志行）
 - [ ] 实现 Backend 内部端口探测（uvicorn 失败自动重试）
 - [ ] 实现 Token 生成与校验

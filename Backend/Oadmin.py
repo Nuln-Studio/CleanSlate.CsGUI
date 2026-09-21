@@ -32,9 +32,12 @@ def run_as_admin():
     sys.exit(0)
 if __name__ == "__main__":
     run_as_admin()
+    print("UAC OK")
     try:
-        import api
-        api.main_entry()
+        import core.api
+        print("import ok")
+        core.api.main_entry()
+        print("main_entry return ok")
     except ImportError as e:
         print(f"模块导入失败: {e}")
         sys.exit(1)
