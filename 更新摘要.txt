@@ -1,4 +1,13 @@
+feat（AI）：实现 GUI 与 Python 后端交互
 
-feat：优化目录，print改成标准函数日志出口，api逻辑优化(为扫描逻辑加上异步调用)，原main重命名为CCroe(原CleanSlate的多线程逻辑并未同步，因为功能暂时不稳定且有bug，沉淀一段时间再同步到这里)
+- 新增 BackendHost.cs：runas 提权启动后端，命名管道握手 + 日志泵
+- 新增 ApiClient.cs：REST 调用（/health、/scan、/scan_task、/status、/version、/clean、/shutdown），Bearer Token 鉴权
+- 新增 MainForm（OCs.GUI.cs）：扫描结果列表、勾选清理、绿色原生进度条、状态栏
+- 新增 StatusPhrases.cs：UI 文案集中管理
+- 日志改为落盘 CsGUI.log，替代原界面内 RichTextBox
+- 进度条：工作中显示"百分比 + 阶段"，空闲时显示当前状态，进度跑满后再切最终态文案
+- 修复：命名管道角色对齐（C# 做服务端），扫描结果补齐 id / name 字段
+- 后端：scanner.py 增加 progress_cb 回调，Ccore.py 的 scan worker 上报扫描进度
 
-原CleanSlate那边是v1.0.5-rc1,然后目前计划GUI这边开始写c#伪代码测试，跑通了逻辑C#图形化界面就开工!
+
+CleanSlate核心那边已经正式版v1.0.5了，这边后端还是v1.0.4正式版的内核修改版，也在不断打磨测试，借助AI之力我们会提升我们的开发速度！

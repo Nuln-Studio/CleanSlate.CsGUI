@@ -459,12 +459,12 @@ def get_all_scans() -> Dict[str, Dict]:
     for item in SCAN_ITEMS:
         func = SCAN_MAP.get(item['id'])
         if func:
-            #backend_log("debug", f"正在扫描: {item['name']}...")
             print(f"[SCAN] 正在扫描: {item['name']}...")
             data = func()
+            data['id'] = item['id']
+            data['name'] = item['name']
             data['risk'] = item['risk']
             results[item['id']] = data
-            #backend_log("debug", f" 完成 ({data.get('size_gb',0):.2f} GB)")
             print(f"[SCAN] 完成 ({data.get('size_gb',0):.2f} GB)")
     return results
 
