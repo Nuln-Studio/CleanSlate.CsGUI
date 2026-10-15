@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<UseWindowsForms>true</UseWindowsForms>
+		<Nullable>disable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<RootNamespace>CleanSlate.CsGUI</RootNamespace>
+		<AssemblyName>CsUI</AssemblyName>
+		<ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+		<ApplicationDefaultFont>Segoe UI, 9pt</ApplicationDefaultFont>
+	</PropertyGroup>
+
+</Project>

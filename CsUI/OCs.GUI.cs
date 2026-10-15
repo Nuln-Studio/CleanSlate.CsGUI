@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
-using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -21,8 +20,13 @@ namespace CleanSlate.CsGUI
         private Button _btnScan;
         private Button _btnClean;
         private Button _btnStatus;
+        private Button _btnSettings;
+        private Button _btnPatches;
         private StatusStrip _statusStrip;
         private ToolStripStatusLabel _statusLabel;
+        private ToolStripStatusLabel _versionLabel;
+
+        private const string GUI_VERSION = "0.1.2";
 
         private bool _isWorking = false;
         private int _displayProgress = 0;
@@ -32,39 +36,25 @@ namespace CleanSlate.CsGUI
         private System.Windows.Forms.Timer _progressTimer;
 
         private readonly List<ScanItem> _scanItems = new List<ScanItem>();
-
-        private readonly object _logLock = new object();
-        private StreamWriter _logWriter;
-        private string _logFilePath;
+        private LogWriter _log;
 
         public MainForm()
         {
-            Text = "CleanSlate.CsGUI";
+            Text = "CleanSlate.CsGUI 图形化客户端";
+            MaximizeBox = false;
             Width = 1000;
             Height = 700;
             StartPosition = FormStartPosition.CenterScreen;
+            AutoScaleMode = AutoScaleMode.Dpi;
+            Font = SystemFonts.MessageBoxFont;
 
-            InitLogFile();
+            _log = new LogWriter(
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CsGUI.log"));
+
             BuildUi();
 
             Load += async (s, e) => await BootstrapAsync();
             FormClosing += MainForm_FormClosing;
-        }
-
-        private void InitLogFile()
-        {
-            _logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CsGUI.log");
-            try
-            {
-                _logWriter = new StreamWriter(_logFilePath, append: true, new UTF8Encoding(false))
-                {
-                    AutoFlush = true
-                };
-            }
-            catch
-            {
-                _logWriter = null;
-            }
         }
 
         private void BuildUi()
@@ -75,43 +65,93 @@ namespace CleanSlate.CsGUI
                 View = View.Details,
                 FullRowSelect = true,
                 CheckBoxes = true,
-                GridLines = true
+                GridLines = false,
+                BorderStyle = BorderStyle.None
             };
             _scanList.Columns.Add("名称", 220);
             _scanList.Columns.Add("大小(GB)", 100, HorizontalAlignment.Right);
             _scanList.Columns.Add("风险", 70);
             _scanList.Columns.Add("说明", 520);
 
-            _bottomPanel = new Panel { Dock = DockStyle.Bottom, Height = 140 };
+            _bottomPanel = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 140,
+                Padding = new Padding(15, 12, 15, 12)
+            };
 
             _progressPanel = new ProgressPanel
             {
+                Height = 28,
                 Left = 15,
                 Top = 15,
-                Height = 30,
-                Width = _bottomPanel.ClientSize.Width - 30
+                Width = _bottomPanel.ClientSize.Width - 30,
+                Font = SystemFonts.MessageBoxFont
             };
+
+            int btnTop = 60;
+            int btnW = 130;
+            int btnH = 42;
+            int gap = 8;
+
+            _btnScan = new Button { Text = "开始扫描", Width = btnW, Height = btnH, Left = 15, Top = btnTop };
+            _btnClean = new Button { Text = "一键清理", Width = btnW, Height = btnH, Left = 15 + (btnW + gap) * 1, Top = btnTop, Enabled = false };
+            _btnStatus = new Button { Text = "磁盘状态", Width = btnW, Height = btnH, Left = 15 + (btnW + gap) * 2, Top = btnTop };
+
+            _btnSettings = new Button
+            {
+                Text = "设置",
+                Width = btnW,
+                Height = btnH,
+                Top = btnTop,
+                FlatStyle = FlatStyle.System,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+
+            _btnPatches = new Button
+            {
+                Text = "补丁管理",
+                Width = btnW,
+                Height = btnH,
+                Top = btnTop,
+                Visible = false,
+                FlatStyle = FlatStyle.System,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+
             _bottomPanel.Resize += (s, e) =>
             {
                 _progressPanel.Width = _bottomPanel.ClientSize.Width - 30;
+                _btnSettings.Left = _bottomPanel.ClientSize.Width - _btnSettings.Width - 15;
+                _btnPatches.Left = _btnSettings.Left - _btnPatches.Width - gap;
             };
-
-            _btnScan = new Button { Text = "开始扫描", Width = 140, Height = 45, Left = 15, Top = 70 };
-            _btnClean = new Button { Text = "一键清理", Width = 140, Height = 45, Left = 165, Top = 70, Enabled = false };
-            _btnStatus = new Button { Text = "磁盘状态", Width = 140, Height = 45, Left = 315, Top = 70 };
 
             _btnScan.Click += async (s, e) => await RunScanAsync();
             _btnClean.Click += async (s, e) => await RunCleanAsync();
             _btnStatus.Click += async (s, e) => await ShowStatusAsync();
+            _btnSettings.Click += async (s, e) => await OpenSettingsAsync();
+            _btnPatches.Click += async (s, e) => await OpenPatchesAsync();
 
             _bottomPanel.Controls.Add(_progressPanel);
             _bottomPanel.Controls.Add(_btnScan);
             _bottomPanel.Controls.Add(_btnClean);
             _bottomPanel.Controls.Add(_btnStatus);
+            _bottomPanel.Controls.Add(_btnSettings);
+            _bottomPanel.Controls.Add(_btnPatches);
 
             _statusStrip = new StatusStrip();
-            _statusLabel = new ToolStripStatusLabel();
+            _statusLabel = new ToolStripStatusLabel
+            {
+                Spring = true,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            _versionLabel = new ToolStripStatusLabel
+            {
+                TextAlign = ContentAlignment.MiddleRight
+            };
             _statusStrip.Items.Add(_statusLabel);
+            _statusStrip.Items.Add(_versionLabel);
+            _statusStrip.SizingGrip = false;
 
             Controls.Add(_scanList);
             Controls.Add(_bottomPanel);
@@ -129,6 +169,7 @@ namespace CleanSlate.CsGUI
         {
             _btnScan.Enabled = on;
             _btnStatus.Enabled = on;
+            _btnSettings.Enabled = on;
             _btnClean.Enabled = on && _scanItems.Count > 0;
         }
 
@@ -223,13 +264,43 @@ namespace CleanSlate.CsGUI
         {
             _api = new ApiClient();
 
+#if DEBUG
+            string devDir = @"D:\Hex备份\项目\CleanSlate.CsGUI\Backend";
+            string devScript = Path.Combine(devDir, "Oadmin.py");
+
+            _log.Write("info", $"[DEBUG] 使用开发模式启动 Backend：py {devScript}");
+
             _backend = new BackendHost(
                 backendPath: "py",
-                backendArgsPrefix: @"D:\Hex备份\项目\CleanSlate.CsGUI\Backend\Oadmin.py",
-                workingDir: @"D:\Hex备份\项目\CleanSlate.CsGUI\Backend",
+                backendArgsPrefix: devScript,
+                workingDir: devDir,
                 pipeConnectTimeoutMs: 30000);
+#else
+            string baseDir = AppContext.BaseDirectory;
+            string backendDir = Path.Combine(baseDir, "Backend");
+            string backendExe = Path.Combine(backendDir, "Backend.exe");
 
-            _backend.LogReceived += (s, e) => AppendLog(e.Level, e.Message);
+            if (File.Exists(backendExe))
+            {
+                _log.Write("info", $"[RELEASE] 使用发布模式启动 Backend：{backendExe}");
+                _backend = new BackendHost(
+                    backendPath: backendExe,
+                    backendArgsPrefix: "",
+                    workingDir: backendDir,
+                    pipeConnectTimeoutMs: 30000);
+            }
+            else
+            {
+                _log.Write("error", $"找不到 Backend.exe：{backendExe}");
+                MessageBox.Show(this,
+                    $"找不到后端程序：\n{backendExe}\n\n请确认 Backend 文件夹已正确安装。",
+                    "启动失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                SetIdle(StatusPhrases.BackendFailed());
+                return;
+            }
+#endif
+
+            _backend.LogReceived += (s, e) => _log.Write(e.Level, e.Message);
             _backend.Exited += (s, e) =>
             {
                 if (IsDisposed) return;
@@ -237,7 +308,7 @@ namespace CleanSlate.CsGUI
                 {
                     BeginInvoke(new Action(() =>
                     {
-                        AppendLog("error", "Backend 进程已退出。");
+                        _log.Write("error", "Backend 进程已退出。");
                         SetIdle(StatusPhrases.BackendExited());
                         SetUiEnabled(false);
                     }));
@@ -245,7 +316,7 @@ namespace CleanSlate.CsGUI
                 catch { }
             };
 
-            AppendLog("info", "正在启动 Backend（将弹出 UAC 提权，请允许）...");
+            _log.Write("info", "正在启动 Backend（将弹出 UAC 提权，请允许）...");
             BeginWork(0, StatusPhrases.BackendStarting());
 
             try
@@ -254,14 +325,14 @@ namespace CleanSlate.CsGUI
             }
             catch (Exception ex)
             {
-                AppendLog("error", $"Backend 启动失败：{ex.Message}");
+                _log.Write("error", $"Backend 启动失败：{ex.Message}");
                 SetIdle(StatusPhrases.BackendFailed());
                 MessageBox.Show(this, ex.Message, "启动失败",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
-            AppendLog("info",
+            _log.Write("info",
                 $"Backend 握手成功：port={_backend.Port}, version={_backend.Version}");
             SetWorkProgress(80, StatusPhrases.BackendChecking());
 
@@ -276,12 +347,30 @@ namespace CleanSlate.CsGUI
 
             if (!ready)
             {
-                AppendLog("error", "Backend /health 健康检查失败。");
+                _log.Write("error", "Backend /health 健康检查失败。");
                 SetIdle("健康检查失败，请查看日志");
                 return;
             }
 
-            AppendLog("info", "Backend 已就绪。");
+            _log.Write("info", "Backend 已就绪。");
+
+            try
+            {
+                string patchJson = await _api.GetPatchesAsync();
+                using var pdoc = JsonDocument.Parse(patchJson);
+                if (pdoc.RootElement.TryGetProperty("enable_patch", out var ep)
+                    && ep.GetBoolean())
+                {
+                    _btnPatches.Visible = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Write("warn", $"查询补丁状态失败：{ex.Message}");
+            }
+
+            _versionLabel.Text = $"GUI版本: v{GUI_VERSION} | 内核版本: {_backend.Version}";
+
             await FinishWorkAsync(100, StatusPhrases.IdleReady());
             SetIdle(StatusPhrases.IdleReady());
             SetUiEnabled(true);
@@ -330,7 +419,7 @@ namespace CleanSlate.CsGUI
                     if (status == "error")
                     {
                         string err = troot.GetProperty("error").GetString();
-                        AppendLog("error", $"扫描失败：{err}");
+                        _log.Write("error", $"扫描失败：{err}");
                         endContent = StatusPhrases.ScanFailed();
                         break;
                     }
@@ -340,7 +429,7 @@ namespace CleanSlate.CsGUI
             }
             catch (Exception ex)
             {
-                AppendLog("error", $"扫描异常：{ex.Message}");
+                _log.Write("error", $"扫描异常：{ex.Message}");
                 endContent = StatusPhrases.ScanFailed();
             }
             finally
@@ -444,7 +533,7 @@ namespace CleanSlate.CsGUI
             try
             {
                 string respJson = await _api.CleanAsync(ids.ToArray(), highRisk);
-                AppendLog("info", "清理结果：" + respJson);
+                _log.Write("info", "清理结果：" + respJson);
 
                 using var doc = JsonDocument.Parse(respJson);
                 var root = doc.RootElement;
@@ -462,7 +551,7 @@ namespace CleanSlate.CsGUI
             }
             catch (Exception ex)
             {
-                AppendLog("error", $"清理异常：{ex.Message}");
+                _log.Write("error", $"清理异常：{ex.Message}");
                 endContent = StatusPhrases.CleanFailed();
             }
             finally
@@ -478,7 +567,7 @@ namespace CleanSlate.CsGUI
             try
             {
                 string json = await _api.GetStatusAsync();
-                AppendLog("info", "磁盘状态：" + json);
+                _log.Write("info", "磁盘状态：" + json);
 
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
@@ -493,22 +582,31 @@ namespace CleanSlate.CsGUI
             }
             catch (Exception ex)
             {
-                AppendLog("error", $"获取磁盘状态失败：{ex.Message}");
+                _log.Write("error", $"获取磁盘状态失败：{ex.Message}");
             }
         }
 
-        private void AppendLog(string level, string message)
+        private async Task OpenSettingsAsync()
         {
-            if (_logWriter == null) return;
-            string line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{level}] {message}";
-            try
+            if (_api == null) return;
+
+            using var dlg = new SettingsForm(_api);
+            var result = dlg.ShowDialog(this);
+
+            if (result == DialogResult.OK)
             {
-                lock (_logLock)
-                {
-                    _logWriter.WriteLine(line);
-                }
+                _log.Write("info", "用户在设置中选择了退出以重启。");
+                Close();
             }
-            catch { }
+        }
+
+        private async Task OpenPatchesAsync()
+        {
+            if (_api == null) return;
+
+            using var dlg = new PatchesForm(_api);
+            dlg.ShowDialog(this);
+            await Task.CompletedTask;
         }
 
         private async void MainForm_FormClosing(object sender, FormClosingEventArgs e)
@@ -528,17 +626,7 @@ namespace CleanSlate.CsGUI
 
             _backend?.Dispose();
             _api?.Dispose();
-
-            try
-            {
-                lock (_logLock)
-                {
-                    _logWriter?.Flush();
-                    _logWriter?.Dispose();
-                    _logWriter = null;
-                }
-            }
-            catch { }
+            _log?.Dispose();
 
             Close();
         }
@@ -580,17 +668,22 @@ namespace CleanSlate.CsGUI
             int h = ClientSize.Height;
             if (w <= 2 || h <= 2) return;
 
-            using (var pen = new Pen(SystemColors.ControlDark))
-                g.DrawRectangle(pen, 0, 0, w - 1, h - 1);
+            var rect = new Rectangle(0, 0, w - 1, h - 1);
+
+            using (var bg = new SolidBrush(SystemColors.Window))
+                g.FillRectangle(bg, rect);
+            using (var border = new Pen(SystemColors.ActiveBorder))
+                g.DrawRectangle(border, rect);
 
             int fill = (int)((w - 2) * _value / 100.0);
             if (fill > 0)
             {
+                var fillRect = new Rectangle(1, 1, fill, h - 2);
                 using (var b = new SolidBrush(Color.FromArgb(6, 176, 37)))
-                    g.FillRectangle(b, 1, 1, fill, h - 2);
+                    g.FillRectangle(b, fillRect);
             }
 
-            Color fg = _value >= 50 ? Color.White : Color.Black;
+            Color fg = _value >= 50 ? Color.White : SystemColors.ControlText;
 
             using (var b = new SolidBrush(fg))
             using (var sf = new StringFormat

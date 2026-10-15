@@ -154,15 +154,19 @@ def create_fastapi_app(valid_token: str,shutdown_event: threading.Event):
     def api_version():
         return Ccore.backend_get_constants()
 
+    from core.cleaner import run_cleaner, run_cleaner_batch
+
     @cs_1.post("/clean", dependencies=[Depends(token_auth)])
     def api_clean(req: dict):
         ids = req.get("ids", [])
-        # allow_high_risk保留，原本的高风险确认用GUI
-        allow_high_risk = req.get("allow_high_risk", False)
-        total_success = total_failed = total_freed_gb = 0
+        result_map = run_cleaner_batch(ids)
+
+        total_success = 0
+        total_failed = 0
+        total_freed_gb = 0.0
         details = []
         for item_id in ids:
-            res = run_cleaner(item_id)
+            res = result_map.get(item_id, {"success": False, "message": "未执行", "freed_gb": 0.0})
             if res["success"]:
                 total_success += 1
             else:
@@ -181,6 +185,168 @@ def create_fastapi_app(valid_token: str,shutdown_event: threading.Event):
             "details": details
         }
 
+    @cs_1.get("/config", dependencies=[Depends(token_auth)])
+    def api_get_config():
+        from core import config as cfgmod
+        return cfgmod.CONFIG
+
+    @cs_1.post("/config", dependencies=[Depends(token_auth)])
+    def api_set_config(req: dict):
+        from core import config as cfgmod
+        import yaml
+        from pathlib import Path
+
+        allowed_top = {
+            "check_update", "custom_cache_dirs", "recycle_bin", "scanner",
+            "backup", "aggressive_mode_enabled", "enable_patch"
+        }
+
+        new_cfg = dict(cfgmod.CONFIG)
+        for key in allowed_top:
+            if key in req:
+                new_cfg[key] = req[key]
+
+        backup = new_cfg.get("backup", {})
+        if isinstance(backup, dict):
+            d = backup.get("dir", "")
+            if d:
+                try:
+                    Path(d).parent.mkdir(parents=True, exist_ok=True)
+                except Exception as e:
+                    raise HTTPException(status_code=400, detail=f"备份目录无效: {e}")
+
+        for p in new_cfg.get("custom_cache_dirs", []):
+            if p and not Path(p).exists():
+                raise HTTPException(status_code=400, detail=f"自定义缓存目录不存在: {p}")
+
+        try:
+            with open(cfgmod.CONFIG_FILE, "w", encoding="utf-8") as f:
+                yaml.safe_dump(new_cfg, f, allow_unicode=True, sort_keys=False)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"写入配置失败: {e}")
+
+        return {"status": "ok", "restart_required": True}
+
+    @cs_1.get("/config/export", dependencies=[Depends(token_auth)])
+    def api_export_config():
+        from core import config as cfgmod
+        try:
+            with open(cfgmod.CONFIG_FILE, "r", encoding="utf-8") as f:
+                content = f.read()
+            return {"status": "ok", "content": content}
+        except FileNotFoundError:
+            return {"status": "ok", "content": ""}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"读取配置失败: {e}")
+
+    @cs_1.post("/config/import", dependencies=[Depends(token_auth)])
+    def api_import_config(req: dict):
+        from core import config as cfgmod
+        import yaml
+        import shutil
+        from datetime import datetime
+
+        content = req.get("content", "")
+        if not content or not content.strip():
+            raise HTTPException(status_code=400, detail="配置内容为空")
+
+        try:
+            parsed = yaml.safe_load(content)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"YAML 解析失败: {e}")
+
+        if not isinstance(parsed, dict):
+            raise HTTPException(status_code=400, detail="配置内容必须是 YAML 映射（键值对）")
+
+        allowed_top = {
+            "check_update", "custom_cache_dirs", "recycle_bin", "scanner",
+            "backup", "aggressive_mode_enabled", "enable_patch", "patch_dir"
+        }
+        unknown = set(parsed.keys()) - allowed_top
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=f"包含未知字段: {', '.join(sorted(unknown))}")
+
+        backup_path = ""
+        if cfgmod.CONFIG_FILE.exists():
+            try:
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                bak = cfgmod.CONFIG_FILE.with_name(
+                    cfgmod.CONFIG_FILE.name + f".bak_{ts}")
+                shutil.copy2(cfgmod.CONFIG_FILE, bak)
+                backup_path = str(bak)
+            except Exception:
+                pass
+
+        try:
+            with open(cfgmod.CONFIG_FILE, "w", encoding="utf-8") as f:
+                f.write(content)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"写入配置失败: {e}")
+
+        return {
+            "status": "ok",
+            "restart_required": True,
+            "backup": backup_path
+        }
+    @cs_1.get("/patches", dependencies=[Depends(token_auth)])
+    def api_get_patches():
+        return Ccore.backend_get_patch_info()
+
+    @cs_1.post("/patches/import", dependencies=[Depends(token_auth)])
+    def api_import_patch(req: dict):
+        import base64
+        from pathlib import Path
+        from core.config import PATCH_DIR
+
+        filename = req.get("filename", "")
+        content_b64 = req.get("content_b64", "")
+
+        if not filename:
+            raise HTTPException(status_code=400, detail="缺少文件名")
+        if not content_b64:
+            raise HTTPException(status_code=400, detail="缺少文件内容")
+
+        safe_name = Path(filename).name
+        suffix = Path(safe_name).suffix.lower()
+        if suffix not in ('.bcs', '.py'):
+            raise HTTPException(status_code=400, detail="只支持 .bcs 或 .py 补丁文件")
+
+        try:
+            content = base64.b64decode(content_b64)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"base64 解码失败: {e}")
+
+        PATCH_DIR.mkdir(parents=True, exist_ok=True)
+        dest = PATCH_DIR / safe_name
+        try:
+            dest.write_bytes(content)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"写入失败: {e}")
+
+        return {"status": "ok", "saved_to": str(dest), "restart_required": True}
+
+    @cs_1.post("/patches/delete", dependencies=[Depends(token_auth)])
+    def api_delete_patch(req: dict):
+        from pathlib import Path
+        from core.config import PATCH_DIR
+
+        filename = req.get("filename", "")
+        if not filename:
+            raise HTTPException(status_code=400, detail="缺少文件名")
+
+        safe_name = Path(filename).name
+        target = PATCH_DIR / safe_name
+        if not target.exists():
+            raise HTTPException(status_code=404, detail="文件不存在")
+
+        try:
+            target.unlink()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"删除失败: {e}")
+
+        return {"status": "ok", "restart_required": True}
     @cs_1.post("/shutdown", dependencies=[Depends(token_auth)])
     #即优雅又简单
     def shutdown():

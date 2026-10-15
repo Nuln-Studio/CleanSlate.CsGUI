@@ -366,6 +366,23 @@ def backend_get_constants():
         "version_code": VERSION_CODE,
         "emergency_mode": EMERGENCY_MODE
     }
+def backend_get_patch_info():
+    from core.config import PATCH_DIR, ENABLE_PATCH
+    files = []
+    if PATCH_DIR.exists():
+        for f in sorted(PATCH_DIR.glob('*')):
+            if f.is_file() and f.suffix.lower() in ('.bcs', '.py'):
+                files.append({
+                    "filename": f.name,
+                    "size": f.stat().st_size,
+                    "loaded": f.stem in _patch_ids
+                })
+    return {
+        "enable_patch": ENABLE_PATCH,
+        "patch_dir": str(PATCH_DIR),
+        "loaded_ids": sorted(_patch_ids),
+        "files": files
+    }
 def initialization(): #初始化清缓存
     get_disk_info()
     clean_backup_files()
