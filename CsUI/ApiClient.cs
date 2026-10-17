@@ -137,6 +137,12 @@ namespace CleanSlate.CsGUI
             resp.EnsureSuccessStatusCode();
             return await resp.Content.ReadAsStringAsync();
         }
+        public async Task<string> GetCleanTaskAsync(string taskId)
+        {
+            var resp = await _http.GetAsync(_baseUrl + $"clean_task/{taskId}");
+            resp.EnsureSuccessStatusCode();
+            return await resp.Content.ReadAsStringAsync();
+        }
         public void Dispose() => _http?.Dispose();
     }
 }

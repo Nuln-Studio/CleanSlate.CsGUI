@@ -27,7 +27,7 @@ namespace CleanSlate.CsGUI
 
         public static string CleanWorking(int n) => $"正在清理 {n} 项，请勿关闭窗口";
         public static string CleanDone(int ok, int fail, double gb)
-            => $"清理完成，成功 {ok} / 失败 {fail}，释放 {gb:F2} GB";
+            => $"清理完成，请务必重新进行扫描，成功 {ok} / 失败 {fail}，释放 {gb:F2} GB";
         public static string CleanFailed() => "清理失败，请查看日志";
     }
 }

@@ -16,8 +16,8 @@ class AppState:
 
 
 
-VERSION_NUM = "正式版v1.0.4"  #别忘了改这个！！！！！！！！！！！！！！！！！！
-VERSION_CODE = 1004   #别忘了改这个！！！！！！！！！！！！！！！！！！
+VERSION_NUM = "正式定制版v1.0.5"  #别忘了改这个！！！！！！！！！！！！！！！！！！
+VERSION_CODE = 1005   #别忘了改这个！！！！！！！！！！！！！！！！！！
 TEMP_PATCH_DIR = BASE_DIR / 'temp_patches'
 PATCH_RETENTION_DAYS = 30
 _patch_scans = []

@@ -26,7 +26,7 @@ namespace CleanSlate.CsGUI
         private ToolStripStatusLabel _statusLabel;
         private ToolStripStatusLabel _versionLabel;
 
-        private const string GUI_VERSION = "0.1.2";
+        private const string GUI_VERSION = "0.1.3";
 
         private bool _isWorking = false;
         private int _displayProgress = 0;
@@ -37,6 +37,10 @@ namespace CleanSlate.CsGUI
 
         private readonly List<ScanItem> _scanItems = new List<ScanItem>();
         private LogWriter _log;
+
+        private Panel _welcomePanel;
+        private Label _lblWelcomeTitle;
+        private Label _lblWelcomeHint;
 
         public MainForm()
         {
@@ -54,6 +58,7 @@ namespace CleanSlate.CsGUI
             BuildUi();
 
             Load += async (s, e) => await BootstrapAsync();
+            Shown += (s, e) => UpdateEmptyLabelPosition();
             FormClosing += MainForm_FormClosing;
         }
 
@@ -162,7 +167,51 @@ namespace CleanSlate.CsGUI
             _progressTimer.Start();
 
             RefreshProgressText();
+
+            _welcomePanel = new Panel
+            {
+                Size = new Size(420, 120),
+                BackColor = SystemColors.Window
+            };
+
+            _lblWelcomeTitle = new Label
+            {
+                Text = "为了向您提供更好的服务",
+                Font = new Font(SystemFonts.MessageBoxFont.FontFamily, 16F, FontStyle.Bold),
+                ForeColor = SystemColors.ControlText,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Top,
+                Height = 40
+            };
+
+            _lblWelcomeHint = new Label
+            {
+                Text = "我们需要进行初始化，请稍候...",
+                Font = new Font(SystemFonts.MessageBoxFont.FontFamily, 10F),
+                ForeColor = SystemColors.GrayText,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Top,
+                Height = 30
+            };
+
+            _welcomePanel.Controls.Add(_lblWelcomeHint);
+            _welcomePanel.Controls.Add(_lblWelcomeTitle);
+
+            Controls.Add(_welcomePanel);
+            _welcomePanel.BringToFront();
+
+            _scanList.Resize += (s, e) => UpdateEmptyLabelPosition();
             SetUiEnabled(false);
+        }
+
+        private void UpdateEmptyLabelPosition()
+        {
+            if (_welcomePanel == null || !_welcomePanel.Visible) return;
+            if (_scanList.Width <= 0 || _scanList.Height <= 0) return;
+
+            int x = _scanList.Left + (_scanList.Width - _welcomePanel.Width) / 2;
+            int y = _scanList.Top + (_scanList.Height - _welcomePanel.Height) / 2;
+            _welcomePanel.Location = new Point(x, y);
         }
 
         private void SetUiEnabled(bool on)
@@ -369,10 +418,16 @@ namespace CleanSlate.CsGUI
                 _log.Write("warn", $"查询补丁状态失败：{ex.Message}");
             }
 
-            _versionLabel.Text = $"GUI版本: v{GUI_VERSION} | 内核版本: {_backend.Version}";
+            _versionLabel.Text = $"GUI版本: v{GUI_VERSION}.dev / 内核版本: {_backend.Version}";
 
             await FinishWorkAsync(100, StatusPhrases.IdleReady());
             SetIdle(StatusPhrases.IdleReady());
+
+            _lblWelcomeTitle.Text = "欢迎使用 CleanSlate.CsGUI";
+            _lblWelcomeHint.Text = "点击下方“开始扫描”，释放您的磁盘空间";
+            _welcomePanel.Visible = true;
+            BeginInvoke(new Action(UpdateEmptyLabelPosition));
+
             SetUiEnabled(true);
         }
 
@@ -383,6 +438,8 @@ namespace CleanSlate.CsGUI
             BeginWork(0, StatusPhrases.ScanSubmitting());
             _scanItems.Clear();
             _scanList.Items.Clear();
+
+            _welcomePanel.Visible = false;
 
             string endContent = StatusPhrases.ScanDone(0, 0);
 
@@ -483,6 +540,18 @@ namespace CleanSlate.CsGUI
             }
 
             _btnClean.Enabled = _scanItems.Count > 0;
+
+            if (_scanItems.Count == 0)
+            {
+                _lblWelcomeTitle.Text = "未发现可清理的文件";
+                _lblWelcomeHint.Text = "您的 C 盘十分干净，无需清理";
+                _welcomePanel.Visible = true;
+                BeginInvoke(new Action(UpdateEmptyLabelPosition));
+            }
+            else
+            {
+                _welcomePanel.Visible = false;
+            }
         }
 
         private static string RiskLabel(string risk)
@@ -532,22 +601,71 @@ namespace CleanSlate.CsGUI
 
             try
             {
-                string respJson = await _api.CleanAsync(ids.ToArray(), highRisk);
-                _log.Write("info", "清理结果：" + respJson);
+                string submitJson = await _api.CleanAsync(ids.ToArray(), highRisk);
+                string taskId;
+                using (var doc = JsonDocument.Parse(submitJson))
+                    taskId = doc.RootElement.GetProperty("task_id").GetString();
 
-                using var doc = JsonDocument.Parse(respJson);
-                var root = doc.RootElement;
-                int ok = root.TryGetProperty("total_success", out var ss) ? ss.GetInt32() : 0;
-                int fail = root.TryGetProperty("total_failed", out var ff) ? ff.GetInt32() : 0;
-                double gb = root.TryGetProperty("total_freed_gb", out var gg) ? gg.GetDouble() : 0;
+                int completedCount = 0;
+                int totalSuccess = 0;
+                int totalFailed = 0;
+                double totalFreedGb = 0.0;
 
-                endContent = StatusPhrases.CleanDone(ok, fail, gb);
+                while (true)
+                {
+                    await Task.Delay(200);
+                    string taskJson = await _api.GetCleanTaskAsync(taskId);
 
+                    using var tdoc = JsonDocument.Parse(taskJson);
+                    var troot = tdoc.RootElement;
+                    string status = troot.GetProperty("status").GetString();
+
+                    if (troot.TryGetProperty("events", out var events))
+                    {
+                        foreach (var evt in events.EnumerateArray())
+                        {
+                            string type = evt.GetProperty("type").GetString();
+                            string tid = evt.GetProperty("tid").GetString();
+
+                            if (type == "start")
+                            {
+                                _log.Write("info", $"开始清理：{tid}");
+                            }
+                            else if (type == "finish")
+                            {
+                                var data = evt.GetProperty("data");
+                                bool success = data.GetProperty("success").GetBoolean();
+                                double freedGb = data.GetProperty("freed_gb").GetDouble();
+                                string msg = data.GetProperty("message").GetString();
+
+                                if (success) totalSuccess++;
+                                else totalFailed++;
+                                totalFreedGb += freedGb;
+                                completedCount++;
+
+                                _log.Write(success ? "info" : "warn", $"清理完成：{tid} ({msg}) 释放 {freedGb:F2} GB");
+
+                                int currentPercent = (int)((completedCount / (double)ids.Count) * 100);
+                                if (currentPercent >= 100) currentPercent = 99;
+                                SetWorkProgress(currentPercent, $"正在清理... ({completedCount}/{ids.Count})");
+                            }
+                        }
+                    }
+
+                    if (status == "done")
+                    {
+                        break;
+                    }
+                }
+
+                endContent = StatusPhrases.CleanDone(totalSuccess, totalFailed, totalFreedGb);
                 await FinishWorkAsync(100, endContent);
 
                 MessageBox.Show(this,
-                    $"清理完成\n成功：{ok}  失败：{fail}\n释放：{gb:F2} GB",
+                    $"清理完成\n成功：{totalSuccess}  失败：{totalFailed}\n释放：{totalFreedGb:F2} GB",
                     "完成");
+
+                _log.Write("info", "清理任务全部完成。");
             }
             catch (Exception ex)
             {
@@ -683,7 +801,7 @@ namespace CleanSlate.CsGUI
                     g.FillRectangle(b, fillRect);
             }
 
-            Color fg = _value >= 50 ? Color.White : SystemColors.ControlText;
+            Color fg = SystemColors.ControlText;
 
             using (var b = new SolidBrush(fg))
             using (var sf = new StringFormat

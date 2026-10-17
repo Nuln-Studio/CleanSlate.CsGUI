@@ -5,14 +5,22 @@ import threading
 import time
 import json
 import ctypes
+import uuid
+import queue
 from ctypes import wintypes
 from core.logutil import set_backend_log_callback
 from fastapi import FastAPI, Depends, Header, HTTPException
 import uvicorn
 from core import Ccore
-from core.cleaner import run_cleaner
+from core.cleaner import (
+    run_cleaner,
+    run_cleaner_batch_async,
+    set_task_event_queue,
+    SERIAL_TASK_IDS
+)
 
 _pipe_lock = threading.Lock()
+
 
 def pipe_open(pipe_name: str) -> int:
     # UAC无法使用stdout，依靠命名管道通信；句柄必须释放
@@ -27,6 +35,7 @@ def pipe_open(pipe_name: str) -> int:
         raise OSError(f"命名管道打开失败 {pipe_full}，确认C#已创建管道服务端")
     return h
 
+
 def pipe_write_line(handle: int, obj: dict):
     # C#按换行符解析JSON
     if handle == 0:
@@ -36,9 +45,11 @@ def pipe_write_line(handle: int, obj: dict):
     with _pipe_lock:
         ctypes.windll.kernel32.WriteFile(handle, buf, len(buf), ctypes.byref(written), None)
 
+
 def pipe_close(handle: int):
     if handle != 0:
         ctypes.windll.kernel32.CloseHandle(handle)
+
 
 def is_process_alive(pid: int) -> bool:
     PROCESS_QUERY_INFORMATION = 0x0400
@@ -50,7 +61,8 @@ def is_process_alive(pid: int) -> bool:
     ctypes.windll.kernel32.CloseHandle(hproc)
     return exit_code.value == 259
 
-def find_free_port(start: int = 72916) -> int:  #72916幸运数字不要改！！！
+
+def find_free_port(start: int = 72916) -> int:  # 72916幸运数字不要改！！！
     # 优先从起点向高位查找
     for port in range(start, 65535):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -68,6 +80,7 @@ def find_free_port(start: int = 72916) -> int:  #72916幸运数字不要改！�
             except OSError:
                 continue
     raise RuntimeError("无可用本地回环端口")
+
 
 def start_uvicorn(app):
     # uvicorn会阻塞，必须后台线程
@@ -103,8 +116,12 @@ def run_parent_heartbeat(parent_pid: int, shutdown_event: threading.Event):
             break
         time.sleep(2)
 
+# 全局清理任务池
+clean_tasks = {}
+_clean_task_lock = threading.Lock()
+
 # 以下是api
-def create_fastapi_app(valid_token: str,shutdown_event: threading.Event):
+def create_fastapi_app(valid_token: str, shutdown_event: threading.Event):
     const = Ccore.backend_get_constants()
     cs_1 = FastAPI(title="CleanSlate Backend", version=const["version_num"])
     event_box = [shutdown_event]
@@ -154,35 +171,71 @@ def create_fastapi_app(valid_token: str,shutdown_event: threading.Event):
     def api_version():
         return Ccore.backend_get_constants()
 
-    from core.cleaner import run_cleaner, run_cleaner_batch
-
     @cs_1.post("/clean", dependencies=[Depends(token_auth)])
     def api_clean(req: dict):
         ids = req.get("ids", [])
-        result_map = run_cleaner_batch(ids)
+        if not ids:
+            raise HTTPException(status_code=400, detail="未提供清理项")
 
-        total_success = 0
-        total_failed = 0
-        total_freed_gb = 0.0
-        details = []
-        for item_id in ids:
-            res = result_map.get(item_id, {"success": False, "message": "未执行", "freed_gb": 0.0})
-            if res["success"]:
-                total_success += 1
-            else:
-                total_failed += 1
-            total_freed_gb += res.get("freed_gb", 0.0)
-            details.append({
-                "id": item_id,
-                "success": res["success"],
-                "freed_gb": res.get("freed_gb", 0.0),
-                "message": res["message"]
-            })
+        task_id = str(uuid.uuid4())
+        q = queue.Queue()
+        set_task_event_queue(q)
+
+        with _clean_task_lock:
+            clean_tasks[task_id] = {
+                "queue": q,
+                "events": [],
+                "status": "running"
+            }
+
+        def worker():
+            normal_ids = []
+            serial_ids = []
+            for tid in ids:
+                if tid in SERIAL_TASK_IDS:
+                    serial_ids.append(tid)
+                else:
+                    normal_ids.append(tid)
+
+            if normal_ids:
+                run_cleaner_batch_async(normal_ids)
+                while True:
+                    try:
+                        ev = q.get(timeout=1.0)
+                    except queue.Empty:
+                        continue
+                    with _clean_task_lock:
+                        clean_tasks[task_id]["events"].append(ev)
+                    if ev["type"] == "all_done":
+                        break
+
+            for sid in serial_ids:
+                with _clean_task_lock:
+                    clean_tasks[task_id]["events"].append({"type": "start", "tid": sid, "data": {}})
+
+                res = run_cleaner(sid)
+
+                with _clean_task_lock:
+                    clean_tasks[task_id]["events"].append({"type": "finish", "tid": sid, "data": res})
+
+            with _clean_task_lock:
+                clean_tasks[task_id]["status"] = "done"
+
+        threading.Thread(target=worker, daemon=True).start()
+        return {"task_id": task_id}
+
+    @cs_1.get("/clean_task/{task_id}", dependencies=[Depends(token_auth)])
+    def api_get_clean_task(task_id: str):
+        with _clean_task_lock:
+            if task_id not in clean_tasks:
+                raise HTTPException(status_code=404, detail="task not found")
+            task = clean_tasks[task_id]
+            current_events = task["events"]
+            task["events"] = []
+
         return {
-            "total_success": total_success,
-            "total_failed": total_failed,
-            "total_freed_gb": round(total_freed_gb, 2),
-            "details": details
+            "status": task["status"],
+            "events": current_events
         }
 
     @cs_1.get("/config", dependencies=[Depends(token_auth)])
@@ -348,7 +401,7 @@ def create_fastapi_app(valid_token: str,shutdown_event: threading.Event):
 
         return {"status": "ok", "restart_required": True}
     @cs_1.post("/shutdown", dependencies=[Depends(token_auth)])
-    #即优雅又简单
+    # 即优雅又简单
     def shutdown():
         event_box[0].set()
         return {"status": "shutting_down", "msg": "Backend开始执行优雅退出"}
