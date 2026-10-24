@@ -26,7 +26,7 @@ namespace CleanSlate.CsGUI
         private ToolStripStatusLabel _statusLabel;
         private ToolStripStatusLabel _versionLabel;
 
-        private const string GUI_VERSION = "0.1.3";
+        private const string GUI_VERSION = "v0.1.3.beta";
 
         private bool _isWorking = false;
         private int _displayProgress = 0;
@@ -51,7 +51,7 @@ namespace CleanSlate.CsGUI
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = SystemFonts.MessageBoxFont;
-
+            try { Icon = GuiIconHelper.Load(); } catch { }
             _log = new LogWriter(
                 Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CsGUI.log"));
 
@@ -418,7 +418,7 @@ namespace CleanSlate.CsGUI
                 _log.Write("warn", $"查询补丁状态失败：{ex.Message}");
             }
 
-            _versionLabel.Text = $"GUI版本: v{GUI_VERSION}.dev / 内核版本: {_backend.Version}";
+            _versionLabel.Text = $"GUI版本: {GUI_VERSION} / 内核版本: {_backend.Version}";
 
             await FinishWorkAsync(100, StatusPhrases.IdleReady());
             SetIdle(StatusPhrases.IdleReady());

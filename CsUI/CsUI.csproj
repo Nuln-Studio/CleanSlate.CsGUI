@@ -10,6 +10,15 @@
 		<AssemblyName>CsUI</AssemblyName>
 		<ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
 		<ApplicationDefaultFont>Segoe UI, 9pt</ApplicationDefaultFont>
+		<ApplicationIcon>app.ico</ApplicationIcon>
 	</PropertyGroup>
+
+	<ItemGroup>
+	  <Content Include="app.ico" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<EmbeddedResource Include="app.ico" LogicalName="app.ico" />
+	</ItemGroup>
 
 </Project>
